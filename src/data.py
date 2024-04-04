@@ -69,7 +69,6 @@ class NuscData(torch.utils.data.Dataset):
                 if rec['channel'] == 'LIDAR_TOP' or (rec['is_key_frame'] and rec['channel'] in self.data_aug_conf['cams']):
                     rec['filename'] = info[rec['filename']]
 
-    
     def get_scenes(self):
         # filter by scene split
         split = {
@@ -226,15 +225,16 @@ class VizData(NuscData):
 class SegmentationData(NuscData):
     def __init__(self, *args, **kwargs):
         super(SegmentationData, self).__init__(*args, **kwargs)
-    
+        self.nsweeps = 1
+
     def __getitem__(self, index):
         rec = self.ixes[index]
 
         cams = self.choose_cams()
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(rec, cams)
+        lidar_pc = self.get_lidar_data(rec, self.nsweeps)
         binimg = self.get_binimg(rec)
-        
-        return imgs, rots, trans, intrins, post_rots, post_trans, binimg
+        return imgs, rots, trans, intrins, post_rots, post_trans, binimg, lidar_pc
 
 
 def worker_rnd_init(x):
@@ -243,8 +243,9 @@ def worker_rnd_init(x):
 
 def compile_data(version, dataroot, data_aug_conf, grid_conf, bsz,
                  nworkers, parser_name):
+
     nusc = NuScenes(version='v1.0-{}'.format(version),
-                    dataroot=os.path.join(dataroot, version),
+                    dataroot=dataroot,
                     verbose=False)
     parser = {
         'vizdata': VizData,
