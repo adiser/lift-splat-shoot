@@ -10,6 +10,7 @@ from time import time
 
 from matplotlib import pyplot as plt
 from pytorch3d.loss import chamfer, chamfer_distance
+from pytorch3d.structures import Pointclouds
 from tensorboardX import SummaryWriter
 import numpy as np
 import os
@@ -47,71 +48,49 @@ def visualize_gt_pred_pc(gt_pc, pred_pc, filepath: Optional[str] = None):
     fig.savefig(filepath)
 
 
-def point_cloud_loss(gt_pc, pred_pc, mode: str = 'pred_first', save_dir: Optional[Any] = None):
-    if save_dir:
-        gt_pc_vis = gt_pc.view(-1, 3).detach().cpu().numpy()
-        pred_pc_vis = pred_pc.view(-1, 3).detach().cpu().numpy()
+def point_cloud_loss(gt_pc: Pointclouds, pred_pc: Pointclouds, mode: str = 'pred_first'):
 
-        # Assuming that gt_pc_vis and pred_pc_vis are 2D arrays with shape (n_points, 2)
-        xs_gt, ys_gt = gt_pc_vis[:, 0], gt_pc_vis[:, 1]
-        xs_pred, ys_pred = pred_pc_vis[:, 0], pred_pc_vis[:, 1]
-
-        fig = plt.figure(figsize=(12, 7))
-        ax = fig.add_subplot(111)  # Adding 3D projection
-
-        # Plotting the first set of points with the first color map
-        img_gt = ax.scatter(xs_gt, ys_gt, c=gt_pc_vis[:, 2], cmap='Blues')
-
-        # Plotting the second set of points with the second color map
-        img_pred = ax.scatter(xs_pred, ys_pred, c=pred_pc_vis[:, 2], cmap='Reds')
-
-        # Creating color bars for each scatter plot
-        fig.colorbar(img_gt, ax=ax, shrink=0.5, aspect=5, label='Ground Truth')
-        fig.colorbar(img_pred, ax=ax, shrink=0.5, aspect=5, label='Prediction')
-
-        # Setting the labels for the axes
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-
-        plt.show()
+    # Get the length of individual point clouds within the batch.
+    gt_lens = [len(p) for p in gt_pc.points_list()]
+    pred_lens = [len(p) for p in pred_pc.points_list()]
 
     assert mode in ['bidirectional', 'gt_first', 'pred_first']
     if mode == 'bidirectional':
-        chamdist, _ = chamfer_distance(gt_pc, pred_pc, single_directional=False)
+        chamdist, _ = chamfer_distance(gt_pc, pred_pc, single_directional=False, x_lengths=gt_lens, y_lengths=pred_lens)
     elif mode == 'gt_first':
-        chamdist, _ = chamfer_distance(gt_pc, pred_pc, single_directional=True)
+        chamdist, _ = chamfer_distance(gt_pc, pred_pc, single_directional=True, x_lengths=gt_lens, y_lengths=pred_lens)
     elif mode == 'pred_first':
-        chamdist, _ = chamfer_distance(pred_pc, gt_pc, single_directional=True)
+        chamdist, _ = chamfer_distance(pred_pc, gt_pc, single_directional=True, x_lengths=pred_lens, y_lengths=gt_lens)
+
     return chamdist
 
 
 def train(version,
-            dataroot='./data/',
-            nepochs=10000,
-            gpuid=1,
-
-            H=900, W=1600,
-            resize_lim=(0.193, 0.225),
-            final_dim=(128, 352),
-            bot_pct_lim=(0.0, 0.22),
-            rot_lim=(-5.4, 5.4),
-            rand_flip=True,
-            ncams=5,
-            max_grad_norm=5.0,
-            pos_weight=2.13,
-            logdir='./runs',
-            xbound=[-50.0, 50.0, 0.5],
-            ybound=[-50.0, 50.0, 0.5],
-            zbound=[-10.0, 10.0, 20.0],
-            dbound=[4.0, 45.0, 1.0],
-            bsz=1,
-            nworkers=10,
-            lr=1e-3,
-            weight_decay=1e-7,
-            pc_loss_weight=5e-2,
-            vis_dir='./visualize',
-            ):
-
+          dataroot='~/lss/data/',
+          nepochs=10000,
+          gpuid=1,
+          H=900, W=1600,
+          resize_lim=(0.193, 0.225),
+          final_dim=(128, 352),
+          bot_pct_lim=(0.0, 0.22),
+          rot_lim=(-5.4, 5.4),
+          rand_flip=True,
+          ncams=5,
+          max_grad_norm=5.0,
+          pos_weight=2.13,
+          logdir='./runs',
+          xbound=[-50.0, 50.0, 0.5],
+          ybound=[-50.0, 50.0, 0.5],
+          zbound=[-10.0, 10.0, 20.0],
+          dbound=[4.0, 45.0, 1.0],
+          bsz=4,
+          nworkers=10,
+          lr=1e-3,
+          weight_decay=1e-7,
+          pc_loss_weight=5e-2,
+          vis_dir='./visualize',
+          experiment_name='baseline'
+          ):
     if not os.path.exists(vis_dir):
         os.makedirs(vis_dir)
 
@@ -122,16 +101,16 @@ def train(version,
         'dbound': dbound,
     }
     data_aug_conf = {
-                    'resize_lim': resize_lim,
-                    'final_dim': final_dim,
-                    'rot_lim': rot_lim,
-                    'H': H, 'W': W,
-                    'rand_flip': rand_flip,
-                    'bot_pct_lim': bot_pct_lim,
-                    'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
-                             'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
-                    'Ncams': ncams,
-                }
+        'resize_lim': resize_lim,
+        'final_dim': final_dim,
+        'rot_lim': rot_lim,
+        'H': H, 'W': W,
+        'rand_flip': rand_flip,
+        'bot_pct_lim': bot_pct_lim,
+        'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
+                 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
+        'Ncams': ncams,
+    }
     trainloader, valloader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
                                           grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
                                           parser_name='segmentationdata')
@@ -145,7 +124,7 @@ def train(version,
 
     loss_fn = SimpleLoss(pos_weight).cuda(gpuid)
 
-    writer = SummaryWriter(logdir=logdir)
+    writer = SummaryWriter(logdir=f'{logdir}/{experiment_name}')
     val_step = 1000 if version == 'mini' else 10000
 
     model.train()
@@ -166,11 +145,17 @@ def train(version,
             binimgs = binimgs.to(device)
             loss = loss_fn(preds, binimgs)
 
-            lidar_pc = lidar_pc.permute(0, 2, 1).to(device)
+            # Calculate the loss for the GT and the Pred PC.
+            # lidar_pc = lidar_pc.permute(0, 2, 1).to(device)
+            lidar_pc = lidar_pc.to(device)
+            pred_pc = Pointclouds(pred_pc)
             pc_loss = point_cloud_loss(gt_pc=lidar_pc, pred_pc=pred_pc, mode='pred_first')
 
+            # Visualize the GT and Pred point cloud from the birds eye view with different color maps.
             if counter % 100 == 0:
-                visualize_gt_pred_pc(gt_pc=lidar_pc, pred_pc=pred_pc, filepath=f'{vis_dir}/gt_pred_pc_{counter}')
+                lidar_pc_vis = lidar_pc.points_list()[0]
+                pred_pc_vis = pred_pc.points_list()[0]
+                visualize_gt_pred_pc(gt_pc=lidar_pc_vis, pred_pc=pred_pc_vis, filepath=f'{vis_dir}/gt_pred_pc_{counter}')
 
             total_loss = loss + pc_loss * pc_loss_weight
             total_loss.backward()
@@ -181,6 +166,7 @@ def train(version,
 
             if counter % 10 == 0:
                 print(counter, loss.item())
+                print(f"Epoch: {epoch}, Iter: {batchi}, Total Loss: {total_loss.item()}, Seg Loss: {loss.item()}, PC Loss {pc_loss.item()}")
                 writer.add_scalar('train/total_loss', total_loss, counter)
                 writer.add_scalar('train/loss_seg', loss, counter)
                 writer.add_scalar('train/loss_pc', pc_loss, counter)
