@@ -32,10 +32,13 @@ def visualize_gt_pred_pc(gt_pc, pred_pc, filepath: Optional[str] = None):
     ax = fig.add_subplot(111)  # Adding 3D projection
 
     # Plotting the first set of points with the first color map
+    img_pred = ax.scatter(xs_pred, ys_pred, c=pred_pc_vis[:, 2], cmap='Reds')
+
+    import ipdb; ipdb.set_trace()
+
     img_gt = ax.scatter(xs_gt, ys_gt, c=gt_pc_vis[:, 2], cmap='Blues')
 
     # Plotting the second set of points with the second color map
-    img_pred = ax.scatter(xs_pred, ys_pred, c=pred_pc_vis[:, 2], cmap='Reds')
 
     # Creating color bars for each scatter plot
     fig.colorbar(img_gt, ax=ax, shrink=0.5, aspect=5, label='Ground Truth')
@@ -48,7 +51,7 @@ def visualize_gt_pred_pc(gt_pc, pred_pc, filepath: Optional[str] = None):
     fig.savefig(filepath)
 
 
-def point_cloud_loss(gt_pc: Pointclouds, pred_pc: Pointclouds, mode: str = 'pred_first'):
+def point_cloud_loss(gt_pc: Pointclouds, pred_pc: Pointclouds, mode: str = 'bidirectional'):
 
     # Get the length of individual point clouds within the batch.
     gt_lens = [len(p) for p in gt_pc.points_list()]
@@ -127,6 +130,9 @@ def train(version,
     writer = SummaryWriter(logdir=f'{logdir}/{experiment_name}')
     val_step = 1000 if version == 'mini' else 10000
 
+    if not os.path.exists(f'{vis_dir}/{experiment_name}'):
+        os.makedirs(f'{vis_dir}/{experiment_name}')
+
     model.train()
     counter = 0
     for epoch in range(nepochs):
@@ -149,19 +155,19 @@ def train(version,
             # lidar_pc = lidar_pc.permute(0, 2, 1).to(device)
             lidar_pc = lidar_pc.to(device)
             pred_pc = Pointclouds(pred_pc)
-            pc_loss = point_cloud_loss(gt_pc=lidar_pc, pred_pc=pred_pc, mode='pred_first')
+            pc_loss = point_cloud_loss(gt_pc=lidar_pc, pred_pc=pred_pc, mode='bidirectional')
 
             # Visualize the GT and Pred point cloud from the birds eye view with different color maps.
-            if counter % 100 == 0:
+            if counter % 100 == 4:
                 lidar_pc_vis = lidar_pc.points_list()[0]
                 pred_pc_vis = pred_pc.points_list()[0]
-                visualize_gt_pred_pc(gt_pc=lidar_pc_vis, pred_pc=pred_pc_vis, filepath=f'{vis_dir}/gt_pred_pc_{counter}')
+                visualize_gt_pred_pc(gt_pc=lidar_pc_vis, pred_pc=pred_pc_vis,
+                                     filepath=f'{vis_dir}/{experiment_name}/gt_pred_pc_{counter}')
 
             total_loss = loss + pc_loss * pc_loss_weight
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             opt.step()
-            counter += 1
             t1 = time()
 
             if counter % 10 == 0:
@@ -189,3 +195,5 @@ def train(version,
                 print('saving', mname)
                 torch.save(model.state_dict(), mname)
                 model.train()
+
+            counter += 1

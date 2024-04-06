@@ -15,9 +15,6 @@ from torchvision.models.resnet import resnet18
 
 from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
 
-matplotlib.use('TkAgg')
-# matplotlib.use('qtagg')
-
 
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
